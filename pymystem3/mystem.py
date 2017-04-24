@@ -5,17 +5,20 @@ A Python wrapper of the Yandex Mystem 3.0 morphological analyzer.
 
 from __future__ import print_function
 
-from itertools import ifilter, imap
 import os
 import platform
 import select
 import subprocess
 import sys
 
-if sys.version_info[0] < 3:
+version = sys.version_info[0]
+if version < 3:
     from cStringIO import StringIO
+    from itertools import ifilter, imap as filter, map
+    _NL = unicode('\n').encode('utf-8')
 else:
     from io import BytesIO as StringIO
+    _NL = str('\n').encode('utf-8')
 
 try:
     import ujson as json
@@ -39,8 +42,6 @@ _TARBALL_URLS = {
         '64bit': "http://download.cdn.yandex.net/mystem/mystem-3.0-freebsd9.0-64bit.tar.gz",
     }
 }
-
-_NL = unicode('\n').encode('utf-8')
 _POSIX = os.name == 'posix'
 
 _PIPELINE_MODE = False
@@ -256,10 +257,10 @@ class Mystem(object):
         :rtype:         list
         """
 
-        need_encode = (sys.version_info[0] < 3 and isinstance(text, str))
+        need_encode = (version < 3 and isinstance(text, str))
 
         infos = self.analyze(text)
-        lemmas = list(ifilter(None, imap(self._get_lemma, infos)))
+        lemmas = list(filter(None, map(self._get_lemma, infos)))
 
         if need_encode is True:
             lemmas = [l.encode('utf-8') for l in lemmas]
@@ -268,7 +269,7 @@ class Mystem(object):
 
     if _PIPELINE_MODE:
         def _analyze_impl(self, text):
-            if isinstance(text, unicode):
+            if version < 3 and isinstance(text, unicode):
                 text = text.encode('utf-8')
 
             if self._proc is None:
@@ -295,9 +296,35 @@ class Mystem(object):
                                            (text, out, sio.getvalue()))
 
             return obj
+    elif os.name == "nt":
+        def _analyze_impl(self, text):
+            if (version < 3 and isinstance(text, unicode)) or (version >= 3 and isinstance(text,str)):
+                text = text.encode('utf-8')
+
+            if self._proc is None:
+                self._start_mystem()
+
+            self._procin.write(text)
+            self._procin.write(_NL)
+            self._procin.flush()
+
+            sio = StringIO()
+            out = None
+            obj = None
+            while True:
+                try:
+                    out = self._procout.readline()
+                    sio.write(out)
+                    obj = json.loads(sio.getvalue().decode('utf-8'))
+                    break
+                except (IOError, ValueError):
+                    raise RuntimeError("Problem has been occured. Current state:\ntext:\n%r\nout:\n%r" %
+                                       (text, out))
+
+            return obj
     else:
         def _analyze_impl(self, text):
-            if isinstance(text, unicode):
+            if (version < 3 and isinstance(text, unicode)) or (version >= 3 and isinstance(text,str)):
                 text = text.encode('utf-8')
 
             if self._proc is None:
